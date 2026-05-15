@@ -1,36 +1,107 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Kafka Queue Controller
 
-## Getting Started
+A browser-based Kafka producer/consumer workbench built with Next.js. Manage multiple Kafka connections, produce and consume messages, persist history locally via IndexedDB, and generate payloads from JSON Schema or Mustache templates.
 
-First, run the development server:
+## Features
+
+- **Multiple connections** — create, edit, delete, import/export Kafka connections with full auth support (NONE, PLAIN, SCRAM-SHA-256, SCRAM-SHA-512, SSL/mTLS)
+- **Produce tab** — send single or batch messages with repeat count & delay; value modes: raw text, JSON Schema (random generation), Mustache template
+- **Consume tab** — SSE-based live consumer with auto-refresh; virtual scrolled message list (up to 5000 messages/tab with FIFO eviction); per-message JSON Schema / Mustache validation
+- **Template system** — full CRUD for reusable JSON Schema and Mustache templates stored in IndexedDB
+- **Workspace tabs** — open multiple produce/consume tabs simultaneously; tab state persisted across reloads
+- **Topic picker** — live topic listing with search and manual refresh
+- **Full import/export** — backup/restore entire database (connections + templates + history) as JSON
+
+## Requirements
+
+- Node.js 18+
+
+## Development
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open http://localhost:3000.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Production Build
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+npm install
+npm run build
+```
 
-## Learn More
+The build produces a [standalone output](https://nextjs.org/docs/app/api-reference/config/next-config-js/output#standalone) at `.next/standalone/`.
 
-To learn more about Next.js, take a look at the following resources:
+Run the standalone server:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```bash
+node ".next/standalone/server.js"
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Default port is **3000**. Override with the `PORT` env var:
 
-## Deploy on Vercel
+```bash
+PORT=8080 node ".next/standalone/server.js"
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Environment Variables
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+No required environment variables. All Kafka connection credentials are entered in the UI and stored in browser IndexedDB.
+
+## Tech Stack
+
+| Layer | Library |
+|---|---|
+| Framework | Next.js 16 (App Router, TypeScript) |
+| UI components | shadcn/ui v5 + @base-ui/react |
+| Icons | lucide-react |
+| Local storage | Dexie.js + dexie-react-hooks (IndexedDB) |
+| Global state | Zustand |
+| Kafka client | kafkajs (server-side API routes only) |
+| Schema generation | json-schema-faker |
+| Schema validation | ajv |
+| Template rendering | mustache + @faker-js/faker |
+| Code editor | @monaco-editor/react |
+| Virtual list | @tanstack/react-virtual |
+| Toasts | sonner |
+
+## Project Structure
+
+```
+src/
+├── app/
+│   ├── api/kafka/
+│   │   ├── consume/route.ts      # SSE stream
+│   │   ├── send/route.ts         # Produce messages
+│   │   ├── test-connection/route.ts
+│   │   ├── test-consumer/route.ts
+│   │   ├── test-producer/route.ts
+│   │   └── topics/route.ts       # List topics
+│   ├── layout.tsx
+│   └── page.tsx
+├── components/
+│   ├── connections/
+│   │   ├── ConnectionForm.tsx    # Create/edit dialog
+│   │   └── ConnectionSidebar.tsx # Left sidebar
+│   ├── consume/
+│   │   └── ConsumeTab.tsx
+│   ├── produce/
+│   │   └── ProduceTab.tsx
+│   ├── shared/
+│   │   └── TopicPicker.tsx
+│   ├── templates/
+│   │   └── TemplatesManager.tsx
+│   └── workspace/
+│       ├── EmptyWorkspace.tsx
+│       ├── WorkspaceShell.tsx
+│       └── WorkspaceTabs.tsx
+└── lib/
+    ├── db/index.ts               # Dexie schema + helpers
+    ├── kafka/client.ts           # kafkajs client builder
+    ├── store/workspace.ts        # Zustand store
+    └── templates/
+        ├── json-schema.ts
+        └── mustache.ts
+```
