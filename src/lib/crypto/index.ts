@@ -2,21 +2,28 @@
  * Client-side AES-256-GCM encryption for sensitive connection fields.
  *
  * Key lifecycle:
- *   - First run: generate a random AES-256-GCM key, export as JWK, persist in
- *     localStorage["kqc_crypto_key"].
- *   - Subsequent runs: import the persisted JWK.
+ *   - If NEXT_PUBLIC_SECRET_KEY env var is set: derive a CryptoKey from the secret
+ *     using PBKDF2. The same secret on any device produces the same key.
+ *   - If no SECRET_KEY: generate a random AES-256-GCM key, export as JWK, persist
+ *     in localStorage["kqc_crypto_key"]. Device-specific key.
+ *   - Subsequent runs: import the persisted JWK (if device mode) or re-derive from
+ *     SECRET_KEY (if secret mode).
  *
  * Ciphertext format: base64( 12-byte-IV || encrypted-bytes )
  *
- * NOTE: The key is device/browser-specific. If localStorage is cleared the
- * stored credentials become unreadable; the app will surface a toast for each
- * field that fails decryption and fall back to an empty string.
+ * NOTE:
+ *   - Device mode (no SECRET_KEY): key is device/browser-specific. If localStorage
+ *     is cleared, stored credentials become unreadable.
+ *   - Secret mode (NEXT_PUBLIC_SECRET_KEY set): key is deterministic. Same secret
+ *     produces same encryption, allowing credential portability across devices.
  */
 
 const KEY_STORAGE = "kqc_crypto_key";
 const ALGORITHM = "AES-GCM";
 const KEY_LENGTH = 256;
 const IV_LENGTH = 12; // bytes – recommended for AES-GCM
+const SECRET_KEY = process.env.NEXT_PUBLIC_SECRET_KEY;
+const USE_SECRET_KEY = !!SECRET_KEY;
 
 let _key: CryptoKey | null = null;
 
@@ -30,6 +37,39 @@ function fromBase64(b64: string): Uint8Array {
   return Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
 }
 
+/**
+ * Derive a CryptoKey from a secret string using PBKDF2.
+ * Returns the same key for the same secret (deterministic).
+ */
+async function deriveKeyFromSecret(secret: string): Promise<CryptoKey> {
+  const crypto = window.crypto;
+
+  // Import the secret as a PBKDF2 key
+  const baseKey = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "PBKDF2" },
+    false,
+    ["deriveBits", "deriveKey"]
+  );
+
+  // Derive AES-GCM key using PBKDF2
+  // Using a fixed salt (can be empty) since secret itself provides entropy
+  const salt = new Uint8Array([]);
+  return crypto.subtle.deriveKey(
+    {
+      name: "PBKDF2",
+      salt,
+      iterations: 100000, // Industry standard
+      hash: "SHA-256",
+    },
+    baseKey,
+    { name: ALGORITHM, length: KEY_LENGTH },
+    false, // Not extractable (better security)
+    ["encrypt", "decrypt"]
+  );
+}
+
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 /**
@@ -41,6 +81,18 @@ export async function initCrypto(): Promise<void> {
 
   const crypto = window.crypto;
 
+  // Mode 1: Use SECRET_KEY from environment (deterministic, device-agnostic)
+  if (USE_SECRET_KEY && SECRET_KEY) {
+    try {
+      _key = await deriveKeyFromSecret(SECRET_KEY);
+      return;
+    } catch (error) {
+      console.error("Failed to derive key from SECRET_KEY:", error);
+      throw new Error("Crypto initialization failed: invalid SECRET_KEY");
+    }
+  }
+
+  // Mode 2: Use device-specific key (random, persisted in localStorage)
   const stored = localStorage.getItem(KEY_STORAGE);
   if (stored) {
     try {

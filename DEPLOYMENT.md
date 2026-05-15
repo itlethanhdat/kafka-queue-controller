@@ -90,12 +90,64 @@ Specifies files to ignore during deployment:
 
 ## Environment Variables
 
+### General
+
 No additional environment variables are required for deployment, but you can customize:
 
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `NODE_ENV` | Set to `development` to show deploy button | auto |
 | `VERCEL_REPO_URL` | GitHub repository URL | `https://github.com/itlethanhdat/kafka-queue-controller` |
+
+### Encryption (NEXT_PUBLIC_SECRET_KEY)
+
+Controls how connection credentials are encrypted:
+
+| Mode | Configuration | Use Case |
+|------|---------------|----------|
+| **Device Mode** | No `NEXT_PUBLIC_SECRET_KEY` set | Default. Each device/browser gets a random encryption key stored in localStorage. Credentials are device-specific. |
+| **Secret Mode** | `NEXT_PUBLIC_SECRET_KEY` set | All devices use the same deterministic key. Exported credentials can be imported on any device with the same secret. |
+
+#### Using Device Mode (Default)
+
+- No environment variable needed
+- Each device generates a unique encryption key
+- Key is stored in browser's localStorage
+- Exported credentials work only on that device
+- Better for personal use
+
+#### Using Secret Mode
+
+Set `NEXT_PUBLIC_SECRET_KEY` to a strong secret string:
+
+```bash
+export NEXT_PUBLIC_SECRET_KEY="your-very-secure-secret-key-min-32-chars"
+npm run dev
+```
+
+Or in `.env.local`:
+
+```
+NEXT_PUBLIC_SECRET_KEY=your-very-secure-secret-key-min-32-chars
+```
+
+**On Vercel:**
+1. Go to project Settings → Environment Variables
+2. Add variable: `NEXT_PUBLIC_SECRET_KEY`
+3. Set value to your secret
+4. Redeploy
+
+**Benefits of Secret Mode:**
+- ✅ Share exported credentials across devices
+- ✅ Deterministic encryption (same secret = same key)
+- ✅ Portable backups work everywhere with the secret
+- ✅ Team collaboration (if secret is shared securely)
+
+**Important:**
+- 🔒 Keep `NEXT_PUBLIC_SECRET_KEY` secure
+- 🔒 Do not commit to git (use `.env.local` or Vercel secrets)
+- 🔒 Use a strong, random secret (minimum 32 characters recommended)
+- 🔒 If secret is compromised, all encrypted data is compromised
 
 ## Security
 
