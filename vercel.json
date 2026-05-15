@@ -3,16 +3,12 @@
   "devCommand": "npm run dev",
   "installCommand": "npm install",
   "framework": "nextjs",
-  "env": [
-    {
-      "key": "NEXT_PUBLIC_APP_NAME",
-      "description": "Application name",
-      "value": "Kafka Queue Controller"
+  "env": {
+    "NEXT_PUBLIC_APP_NAME": {
+      "description": "Application name"
     },
-    {
-      "key": "NEXT_PUBLIC_SECRET_KEY",
-      "description": "Optional: Encryption secret for connection credentials. If set, credentials can be shared across devices. If not set, device-specific encryption is used.",
-      "value": ""
+    "NEXT_PUBLIC_SECRET_KEY": {
+      "description": "Optional: Encryption secret for connection credentials. If set, credentials can be shared across devices. If not set, device-specific encryption is used."
     }
-  ]
+  }
 }
