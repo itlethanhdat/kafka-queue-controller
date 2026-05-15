@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { db } from "@/lib/db";
+import { getConnection } from "@/lib/db/connections";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -35,7 +35,7 @@ export default function TopicPicker({ connectionId, value, onChange, placeholder
 
   const fetchTopics = async () => {
     if (!connectionId) return;
-    const conn = await db.connections.get(connectionId);
+    const conn = await getConnection(connectionId);
     if (!conn) return;
     setLoading(true);
     try {

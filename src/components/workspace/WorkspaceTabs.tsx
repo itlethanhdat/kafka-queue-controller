@@ -16,8 +16,6 @@ export default function WorkspaceTabs() {
     await db.tabs.delete(id);
   };
 
-  const activeTab = tabs.find((t) => t.id === activeTabId);
-
   return (
     <div className="flex flex-col h-full">
       {/* Tab bar */}
@@ -51,13 +49,22 @@ export default function WorkspaceTabs() {
         ))}
       </div>
 
-      {/* Tab content */}
-      <div className="flex-1 overflow-hidden">
-        {activeTab?.type === "produce" && activeTab.id != null && (
-          <ProduceTab tabId={activeTab.id} connectionId={activeTab.connectionId} />
-        )}
-        {activeTab?.type === "consume" && activeTab.id != null && (
-          <ConsumeTab tabId={activeTab.id} connectionId={activeTab.connectionId} />
+      {/* Tab content — all tabs are mounted; inactive ones are hidden via CSS
+           so SSE connections and consuming state survive tab switches. */}
+      <div className="flex-1 overflow-hidden relative">
+        {tabs.map((tab) =>
+          tab.id == null ? null : (
+            <div
+              key={tab.id}
+              className={cn("absolute inset-0 overflow-hidden", activeTabId !== tab.id && "hidden")}
+            >
+              {tab.type === "produce" ? (
+                <ProduceTab tabId={tab.id} connectionId={tab.connectionId} />
+              ) : (
+                <ConsumeTab tabId={tab.id} connectionId={tab.connectionId} />
+              )}
+            </div>
+          )
         )}
       </div>
     </div>

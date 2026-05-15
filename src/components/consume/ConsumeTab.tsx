@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { db, addMessage } from "@/lib/db";
 import type { Connection, KafkaMessage } from "@/lib/db";
+import { getConnection } from "@/lib/db/connections";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -62,7 +63,7 @@ export default function ConsumeTab({ tabId, connectionId }: Props) {
   const [messages, setMessages] = useState<KafkaMessage[]>([]);
   const [expandedId, setExpandedId] = useState<number | null>(null);
 
-  const sseRef = useRef<EventSource | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
   const autoRefreshRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const parentRef = useRef<HTMLDivElement>(null);
 
@@ -82,7 +83,7 @@ export default function ConsumeTab({ tabId, connectionId }: Props) {
 
   // Load connection
   useEffect(() => {
-    if (connectionId) db.connections.get(connectionId).then((c) => setConnection(c ?? null));
+    if (connectionId) getConnection(connectionId).then((c) => setConnection(c ?? null));
   }, [connectionId]);
 
   const persistConfig = async (patch: Partial<TabConfig>) => {
@@ -92,9 +93,9 @@ export default function ConsumeTab({ tabId, connectionId }: Props) {
   };
 
   const stopConsuming = useCallback(() => {
-    if (sseRef.current) {
-      sseRef.current.close();
-      sseRef.current = null;
+    if (abortRef.current) {
+      abortRef.current.abort();
+      abortRef.current = null;
     }
     if (autoRefreshRef.current) {
       clearTimeout(autoRefreshRef.current);
@@ -108,55 +109,97 @@ export default function ConsumeTab({ tabId, connectionId }: Props) {
     if (!config.topic) return toast.error("Topic is required");
     stopConsuming();
 
-    const groupId = config.groupId || `kafka-controller-${tabId}-${Date.now()}`;
-    const params = new URLSearchParams({
-      connection: JSON.stringify(connection),
-      topic: config.topic,
-      groupId,
-      fromBeginning: String(config.fromBeginning),
-    });
+    // Default to a fresh groupId per Start so the broker never parks the
+    // consumer at a previously-committed offset. Honor a user-typed group id
+    // verbatim when they want resume semantics.
+    const groupId = config.groupId?.trim() || `kqc-${tabId}-${Date.now()}`;
 
-    const es = new EventSource(`/api/kafka/consume?${params.toString()}`);
-    sseRef.current = es;
+    const ac = new AbortController();
+    abortRef.current = ac;
     setConsuming(true);
 
-    es.addEventListener("connected", () => {
-      toast.success(`Consuming from ${config.topic}`);
-    });
+    try {
+      const res = await fetch("/api/kafka/consume", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          connection,
+          topic: config.topic,
+          groupId,
+          fromBeginning: config.fromBeginning,
+        }),
+        signal: ac.signal,
+      });
 
-    es.addEventListener("message", async (e) => {
-      try {
-        const raw = JSON.parse(e.data) as Omit<KafkaMessage, "id" | "tabId">;
-        const msg: Omit<KafkaMessage, "id"> = { ...raw, tabId };
-        await addMessage(msg);
-        setMessages((prev) => {
-          const updated = [...prev, { ...msg }];
-          if (updated.length > 5000) return updated.slice(-5000);
-          return updated;
-        });
-      } catch {}
-    });
-
-    es.addEventListener("error", (e: MessageEvent) => {
-      try {
-        const data = JSON.parse(e.data);
-        toast.error(`Consumer error: ${data.error}`);
-      } catch {}
-      stopConsuming();
-    });
-
-    es.onerror = () => {
-      if (sseRef.current?.readyState === EventSource.CLOSED) {
-        stopConsuming();
+      if (!res.ok || !res.body) {
+        const txt = await res.text().catch(() => res.statusText);
+        toast.error(`Consumer error: ${txt}`);
+        setConsuming(false);
+        return;
       }
-    };
 
-    // Auto-refresh (restart consumer after N ms)
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = "";
+
+      // SSE line parser
+      const handleChunk = async (chunk: string) => {
+        buf += chunk;
+        const blocks = buf.split("\n\n");
+        buf = blocks.pop() ?? "";
+        for (const block of blocks) {
+          const lines = block.split("\n");
+          let eventName = "message";
+          let dataStr = "";
+          for (const line of lines) {
+            if (line.startsWith("event:")) eventName = line.slice(6).trim();
+            else if (line.startsWith("data:")) dataStr = line.slice(5).trim();
+          }
+          if (!dataStr || dataStr === "") continue;
+          if (eventName === "connected") {
+            toast.success(`Consuming from ${config.topic}`);
+          } else if (eventName === "message") {
+            try {
+              const raw = JSON.parse(dataStr) as Omit<KafkaMessage, "id" | "tabId">;
+              const msg: Omit<KafkaMessage, "id"> = { ...raw, tabId };
+              await addMessage(msg);
+              setMessages((prev) => {
+                const updated = [...prev, { ...msg }];
+                return updated.length > 5000 ? updated.slice(-5000) : updated;
+              });
+            } catch { /* ignore malformed */ }
+          } else if (eventName === "error") {
+            try {
+              const { error } = JSON.parse(dataStr);
+              toast.error(`Consumer error: ${error}`);
+            } catch { /* ignore */ }
+            stopConsuming();
+            return;
+          }
+        }
+      };
+
+      // Read the stream until done or aborted
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        await handleChunk(decoder.decode(value, { stream: true }));
+      }
+    } catch (err: unknown) {
+      if ((err as { name?: string }).name !== "AbortError") {
+        toast.error(`Consumer error: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    } finally {
+      if (abortRef.current === ac) {
+        abortRef.current = null;
+        setConsuming(false);
+      }
+    }
+
+    // Auto-refresh: restart consumer after N ms
     const refreshMs = parseInt(config.autoRefreshMs) || 0;
-    if (refreshMs > 0) {
-      autoRefreshRef.current = setTimeout(() => {
-        startConsuming();
-      }, refreshMs);
+    if (refreshMs > 0 && !ac.signal.aborted) {
+      autoRefreshRef.current = setTimeout(() => startConsuming(), refreshMs);
     }
   }, [connection, config, tabId, stopConsuming]);
 

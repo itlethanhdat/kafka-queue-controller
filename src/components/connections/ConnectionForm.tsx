@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { db } from "@/lib/db";
 import type { Connection, AuthType } from "@/lib/db";
+import { addConnection, updateConnection } from "@/lib/db/connections";
 import {
   Dialog,
   DialogContent,
@@ -81,12 +81,11 @@ export default function ConnectionForm({ open, onOpenChange, initial }: Props) {
 
     setSaving(true);
     try {
-      const now = Date.now();
       if (initial?.id) {
-        await db.connections.update(initial.id, { ...form, updatedAt: now });
+        await updateConnection(initial.id, form);
         toast.success("Connection updated");
       } else {
-        await db.connections.add({ ...form, createdAt: now, updatedAt: now });
+        await addConnection(form);
         toast.success("Connection created");
       }
       onOpenChange(false);

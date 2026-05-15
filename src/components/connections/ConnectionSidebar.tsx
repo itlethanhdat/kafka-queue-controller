@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "@/lib/db";
 import type { Connection } from "@/lib/db";
+import { getAllConnections, deleteConnection, exportConnections, importConnections } from "@/lib/db/connections";
 import { useWorkspaceStore } from "@/lib/store/workspace";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -48,26 +49,28 @@ import {
 import { toast } from "sonner";
 import ConnectionForm from "./ConnectionForm";
 import TemplatesManager from "@/components/templates/TemplatesManager";
-import { exportDB, importDB } from "@/lib/db";
+
 import { cn } from "@/lib/utils";
 
-export default function ConnectionSidebar() {
+interface Props {
+  width?: number;
+}
+
+export default function ConnectionSidebar({ width }: Props) {
   const [search, setSearch] = useState("");
   const [formOpen, setFormOpen] = useState(false);
   const [editConn, setEditConn] = useState<Connection | undefined>();
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [templatesOpen, setTemplatesOpen] = useState(false);
 
-  const connections = useLiveQuery(
-    () => db.connections.orderBy("name").toArray(),
-    []
-  );
+  // useLiveQuery watches for DB changes; getAllConnections decrypts on read
+  const connections = useLiveQuery(() => getAllConnections(), []);
 
   const filtered = (connections ?? []).filter((c) =>
     c.name.toLowerCase().includes(search.toLowerCase())
   );
 
-  const { addTab, setActiveTabId } = useWorkspaceStore();
+  const { setActiveTabId } = useWorkspaceStore();
 
   const openTab = async (conn: Connection, type: "produce" | "consume") => {
     const title = `${type === "produce" ? "✏️" : "📥"} ${conn.name}`;
@@ -80,22 +83,27 @@ export default function ConnectionSidebar() {
       order,
       createdAt: Date.now(),
     });
-    const newTab = await db.tabs.get(id);
-    if (newTab) {
-      addTab(newTab);
-      setActiveTabId(newTab.id ?? null);
-    }
+    // Let useLiveQuery in WorkspaceShell be the single source of truth for the
+    // tab list. We only update activeTabId immediately so the new tab is shown.
+    setActiveTabId(id as number);
   };
 
   const handleDelete = async () => {
     if (deleteId == null) return;
-    await db.connections.delete(deleteId);
+    await deleteConnection(deleteId);
     setDeleteId(null);
     toast.success("Connection deleted");
   };
 
   const handleExportAll = async () => {
-    const json = await exportDB();
+    // Decrypt connections so the exported JSON is portable across devices
+    const [decryptedConns, tabs, templates, messages] = await Promise.all([
+      exportConnections(),
+      db.tabs.toArray(),
+      db.templates.toArray(),
+      db.messages.toArray(),
+    ]);
+    const json = JSON.stringify({ connections: decryptedConns, tabs, templates, messages }, null, 2);
     const blob = new Blob([json], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -115,7 +123,23 @@ export default function ConnectionSidebar() {
       if (!file) return;
       const text = await file.text();
       try {
-        await importDB(text);
+        const data = JSON.parse(text) as {
+          connections?: Connection[];
+          tabs?: unknown[];
+          templates?: unknown[];
+          messages?: unknown[];
+        };
+        // Re-encrypt connections on import
+        if (data.connections) await importConnections(data.connections);
+        // Restore remaining tables via Dexie directly
+        await db.transaction("rw", db.tabs, db.templates, db.messages, async () => {
+          await db.tabs.clear();
+          await db.templates.clear();
+          await db.messages.clear();
+          if (data.tabs?.length) await db.tabs.bulkAdd(data.tabs as Parameters<typeof db.tabs.bulkAdd>[0]);
+          if (data.templates?.length) await db.templates.bulkAdd(data.templates as Parameters<typeof db.templates.bulkAdd>[0]);
+          if (data.messages?.length) await db.messages.bulkAdd(data.messages as Parameters<typeof db.messages.bulkAdd>[0]);
+        });
         toast.success("Database imported successfully");
       } catch {
         toast.error("Failed to import: invalid file");
@@ -124,7 +148,8 @@ export default function ConnectionSidebar() {
     input.click();
   };
 
-  const handleExportConn = (conn: Connection) => {
+  const handleExportConn = async (conn: Connection) => {
+    // conn is already decrypted because it came from getAllConnections()
     const json = JSON.stringify(conn, null, 2);
     const blob = new Blob([json], { type: "application/json" });
     const url = URL.createObjectURL(blob);
@@ -137,7 +162,10 @@ export default function ConnectionSidebar() {
   };
 
   return (
-    <aside className="flex flex-col w-64 shrink-0 border-r border-border bg-muted/20 h-screen overflow-hidden">
+      <aside
+        className="flex flex-col shrink-0 border-r border-border bg-muted/20 h-screen overflow-hidden"
+        style={{ width: width ?? 256 }}
+      >
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-3 shrink-0">
         <span className="font-semibold text-sm flex items-center gap-1.5">

@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import dynamic from "next/dynamic";
 import { db } from "@/lib/db";
 import type { Connection } from "@/lib/db";
+import { getConnection } from "@/lib/db/connections";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -79,7 +80,7 @@ export default function ProduceTab({ tabId, connectionId }: Props) {
 
   // Load connection
   useEffect(() => {
-    if (connectionId) db.connections.get(connectionId).then((c) => setConnection(c ?? null));
+    if (connectionId) getConnection(connectionId).then((c) => setConnection(c ?? null));
   }, [connectionId]);
 
   const persistConfig = async (patch: Partial<TabConfig>) => {
