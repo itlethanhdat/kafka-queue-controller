@@ -1,0 +1,14 @@
+{
+  "buildCommand": "npm run build",
+  "devCommand": "npm run dev",
+  "installCommand": "npm install",
+  "framework": "nextjs",
+  "nodeVersion": "20.x",
+  "env": [
+    {
+      "key": "NEXT_PUBLIC_APP_NAME",
+      "description": "Application name",
+      "value": "Kafka Queue Controller"
+    }
+  ]
+}

@@ -46,6 +46,24 @@ Default port is **3000**. Override with the `PORT` env var:
 PORT=8080 node ".next/standalone/server.js"
 ```
 
+## Deployment
+
+### One-Click Deploy to Vercel (Development)
+
+When running in development mode, a **"Deploy to Vercel"** button appears in the bottom-right corner. Click it to deploy the application to Vercel with automatic configuration.
+
+**Requirements:**
+- Vercel account (free tier supported)
+- GitHub account connected to Vercel
+
+**Steps:**
+1. Run `npm run dev`
+2. Click the **"Deploy to Vercel"** button
+3. Complete setup on Vercel dashboard
+4. Application will be live at `https://your-project.vercel.app`
+
+For detailed deployment instructions, see [DEPLOYMENT.md](./DEPLOYMENT.md)
+
 ## Environment Variables
 
 No required environment variables. All Kafka connection credentials are entered in the UI and stored in browser IndexedDB.
